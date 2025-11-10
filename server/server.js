@@ -9,15 +9,43 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+
+// Define allowed origins
+const allowedOrigins = [
+  'https://skillswap-mcin.onrender.com',
+  'https://69116f5.--skill-shift.netlify.app',
+  'http://localhost:5173', // For local development
+  'http://localhost:3000',
+  process.env.CLIENT_URL
+].filter(Boolean); // Remove undefined values
+
+// Socket.IO with proper CORS
 const io = socketIO(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
-// Middleware
-app.use(cors());
+// CORS Middleware - FIXED
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -35,6 +63,11 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/connections', require('./routes/connections'));
 app.use('/api/messages', require('./routes/messages'));
 app.use('/api/classes', require('./routes/classes'));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Socket.IO for Real-time Chat
 const activeUsers = new Map();
@@ -86,4 +119,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📡 Allowed origins:`, allowedOrigins);
 });
