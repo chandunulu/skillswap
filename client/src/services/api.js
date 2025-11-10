@@ -26,6 +26,30 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+// chat
+export const registerUser = async (userData) => {
+  try {
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(userData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || "Failed to register");
+    }
+
+    const data = await response.json();
+    return data;
+
+  } catch (error) {
+    console.error("Registration error:", error.message);
+    return { error: error.message };
+  }
+};
 
 export default api;
 
