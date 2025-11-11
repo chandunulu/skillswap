@@ -4,6 +4,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
 const socketIO = require('socket.io');
+const cron = require('node-cron');
 
 dotenv.config();
 
@@ -54,7 +55,11 @@ mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('✅ MongoDB Connected'))
+.then(() => {
+  console.log('✅ MongoDB Connected');
+  // Start the cleanup job after DB connection
+  startClassCleanupJob();
+})
 .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // Routes
@@ -109,6 +114,42 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id);
   });
 });
+
+// Auto-delete classes 24 hours after their scheduled time
+async function deleteExpiredClasses() {
+  try {
+    const Class = require('./models/Class');
+    const now = new Date();
+    
+    // Calculate 24 hours ago
+    const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+    
+    // Find and delete classes that are 24+ hours past their scheduled time
+    const result = await Class.deleteMany({
+      date: { $lte: twentyFourHoursAgo }
+    });
+    
+    if (result.deletedCount > 0) {
+      console.log(`🗑️  Auto-deleted ${result.deletedCount} expired classes (24h+ old)`);
+    }
+  } catch (error) {
+    console.error('❌ Error deleting expired classes:', error);
+  }
+}
+
+// Start cron job to check every hour
+function startClassCleanupJob() {
+  // Run every hour at minute 0
+  cron.schedule('0 * * * *', () => {
+    console.log('🔄 Running automatic class cleanup...');
+    deleteExpiredClasses();
+  });
+  
+  console.log('✅ Class cleanup job scheduled (runs every hour)');
+  
+  // Also run once immediately on startup
+  deleteExpiredClasses();
+}
 
 // Error Handler
 app.use((err, req, res, next) => {

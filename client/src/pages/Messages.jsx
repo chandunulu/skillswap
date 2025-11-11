@@ -9,6 +9,7 @@ const Messages = () => {
   const { user } = useAuth();
   const location = useLocation();
   const [conversations, setConversations] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -26,20 +27,16 @@ const Messages = () => {
       const socket = initializeSocket(user._id);
       socketInitialized.current = true;
 
-      // Emit user-online event
       socket.emit('user-online', user._id);
 
-      // Listen for incoming messages
       socket.on('receive-message', (message) => {
         console.log('Received message:', message);
         if (selectedUser && message.sender._id === selectedUser._id) {
           setMessages((prev) => [...prev, message]);
         }
-        // Update conversations list
         fetchConversations();
       });
 
-      // Listen for typing indicator
       socket.on('user-typing', (data) => {
         console.log('User typing:', data);
         if (selectedUser && data.senderId === selectedUser._id) {
@@ -55,20 +52,19 @@ const Messages = () => {
     }
   }, [user?._id]);
 
-  // Handle navigation state (when coming from Connections)
+  // Handle navigation state
   useEffect(() => {
     if (location.state?.selectedUser) {
       console.log('Auto-selecting user from navigation:', location.state.selectedUser);
-      handleUserSelect({ _id: location.state.selectedUser });
-      // Clear the navigation state
+      handleUserSelect(location.state.selectedUser);
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
 
-  // Fetch conversations on mount
+  // Fetch conversations and connections on mount
   useEffect(() => {
     if (user?._id) {
-      fetchConversations();
+      fetchConversationsAndConnections();
     }
   }, [user?._id]);
 
@@ -80,20 +76,37 @@ const Messages = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const fetchConversationsAndConnections = async () => {
+    try {
+      console.log('Fetching conversations and connections...');
+      
+      // Fetch both conversations and connections in parallel
+      const [conversationsRes, connectionsRes] = await Promise.all([
+        api.get('/messages/conversations').catch(() => ({ data: [] })),
+        api.get('/connections/list').catch(() => ({ data: [] }))
+      ]);
+
+      console.log('Conversations response:', conversationsRes.data);
+      console.log('Connections response:', connectionsRes.data);
+
+      setConversations(conversationsRes.data);
+      setConnections(connectionsRes.data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchConversations = async () => {
     try {
-      console.log('Fetching conversations...');
       const response = await api.get('/messages/conversations');
-      console.log('Conversations response:', response.data);
       setConversations(response.data);
     } catch (error) {
       console.error('Error fetching conversations:', error);
-      // If no conversations exist yet, that's okay
       if (error.response?.status === 404) {
         setConversations([]);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -105,26 +118,26 @@ const Messages = () => {
       setMessages(response.data);
     } catch (error) {
       console.error('Error fetching messages:', error);
-      // If no messages exist yet, start with empty array
       if (error.response?.status === 404) {
         setMessages([]);
       }
     }
   };
 
-  const handleUserSelect = async (conversationOrUser) => {
-    console.log('Selecting user:', conversationOrUser);
+  const handleUserSelect = async (userOrConversation) => {
+    console.log('Selecting user:', userOrConversation);
+    
+    let otherUser;
     
     // Handle different input formats
-    let otherUser;
-    if (conversationOrUser._id && typeof conversationOrUser._id === 'object') {
-      // From conversations list: { _id: {user object}, lastMessage, unreadCount }
-      otherUser = conversationOrUser._id;
-    } else if (conversationOrUser._id) {
-      // From navigation or direct user object
-      otherUser = conversationOrUser;
+    if (userOrConversation._id && typeof userOrConversation._id === 'object') {
+      // From conversations list
+      otherUser = userOrConversation._id;
+    } else if (userOrConversation._id || userOrConversation.id) {
+      // Direct user object (from connections or navigation)
+      otherUser = userOrConversation;
     } else {
-      console.error('Invalid user selection:', conversationOrUser);
+      console.error('Invalid user selection:', userOrConversation);
       return;
     }
     
@@ -139,7 +152,7 @@ const Messages = () => {
       // Mark messages as read
       try {
         await api.put(`/messages/read/${userId}`);
-        fetchConversations(); // Refresh to update unread count
+        fetchConversations();
       } catch (error) {
         console.error('Error marking messages as read:', error);
       }
@@ -169,7 +182,6 @@ const Messages = () => {
 
       console.log('Message sent:', response.data);
 
-      // Emit socket event
       const socket = getSocket();
       if (socket) {
         socket.emit('send-message', {
@@ -178,11 +190,9 @@ const Messages = () => {
         });
       }
 
-      // Add message to local state immediately
       setMessages([...messages, response.data]);
       setNewMessage('');
       
-      // Refresh conversations list
       fetchConversations();
     } catch (error) {
       console.error('Error sending message:', error);
@@ -206,20 +216,68 @@ const Messages = () => {
       });
     }
 
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Set new timeout
-    typingTimeoutRef.current = setTimeout(() => {
-      // Stop typing after 3 seconds
-    }, 3000);
+    typingTimeoutRef.current = setTimeout(() => {}, 3000);
   };
 
-  const filteredConversations = conversations.filter((conv) => {
-    const otherUser = conv._id || conv.user || conv;
-    const userName = otherUser?.name || '';
+  // Merge conversations and connections
+  const getMergedList = () => {
+    const conversationMap = new Map();
+    
+    // Add all conversations with their metadata
+    conversations.forEach(conv => {
+      const otherUser = conv._id || conv.user || conv;
+      const userId = otherUser?._id || otherUser?.id;
+      if (userId) {
+        conversationMap.set(userId, {
+          user: otherUser,
+          lastMessage: conv.lastMessage,
+          unreadCount: conv.unreadCount || 0,
+          hasConversation: true
+        });
+      }
+    });
+
+    // Add connections that don't have conversations
+    connections.forEach(connection => {
+      const userId = connection._id || connection.id;
+      if (userId && !conversationMap.has(userId)) {
+        conversationMap.set(userId, {
+          user: connection,
+          lastMessage: null,
+          unreadCount: 0,
+          hasConversation: false
+        });
+      }
+    });
+
+    // Convert to array and sort: conversations first, then alphabetically
+    return Array.from(conversationMap.values()).sort((a, b) => {
+      // Prioritize items with conversations
+      if (a.hasConversation && !b.hasConversation) return -1;
+      if (!a.hasConversation && b.hasConversation) return 1;
+      
+      // Then sort by last message time for conversations
+      if (a.hasConversation && b.hasConversation) {
+        const timeA = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+        const timeB = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+        return timeB - timeA;
+      }
+      
+      // Alphabetically for non-conversation connections
+      const nameA = a.user?.name || '';
+      const nameB = b.user?.name || '';
+      return nameA.localeCompare(nameB);
+    });
+  };
+
+  const mergedList = getMergedList();
+
+  const filteredList = mergedList.filter((item) => {
+    const userName = item.user?.name || '';
     return userName.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
@@ -250,7 +308,7 @@ const Messages = () => {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex bg-white">
-      {/* Conversations List */}
+      {/* Connections/Conversations List */}
       <div className="w-80 border-r border-gray-200 flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-200">
@@ -263,30 +321,30 @@ const Messages = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search conversations..."
+              placeholder="Search connections..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none text-sm"
             />
           </div>
         </div>
 
-        {/* Conversations */}
+        {/* List */}
         <div className="flex-1 overflow-y-auto">
-          {filteredConversations.length === 0 ? (
+          {filteredList.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full p-6 text-center">
               <MessageCircle className="text-gray-400 mb-4" size={48} />
-              <p className="text-gray-600 text-sm">No conversations yet</p>
+              <p className="text-gray-600 text-sm">No connections yet</p>
               <p className="text-gray-500 text-xs mt-2">Connect with users to start chatting</p>
             </div>
           ) : (
-            filteredConversations.map((conv) => {
-              const otherUser = conv._id || conv.user || conv;
+            filteredList.map((item) => {
+              const otherUser = item.user;
               const userId = otherUser?._id || otherUser?.id;
               const userName = otherUser?.name || 'Unknown User';
               
               return (
                 <div
                   key={userId || Math.random()}
-                  onClick={() => handleUserSelect(conv)}
+                  onClick={() => handleUserSelect(otherUser)}
                   className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
                     selectedUser && (selectedUser._id === userId || selectedUser.id === userId)
                       ? 'bg-primary-50 border-l-4 border-l-primary-600'
@@ -303,18 +361,20 @@ const Messages = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <h3 className="font-semibold text-gray-900 truncate">{userName}</h3>
-                        <span className="text-xs text-gray-500">
-                          {conv.lastMessage && formatTime(conv.lastMessage.createdAt)}
-                        </span>
+                        {item.lastMessage && (
+                          <span className="text-xs text-gray-500">
+                            {formatTime(item.lastMessage.createdAt)}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-600 truncate">
-                        {conv.lastMessage?.content || 'No messages yet'}
+                        {item.lastMessage?.content || 'Start a conversation'}
                       </p>
                     </div>
 
-                    {conv.unreadCount > 0 && (
+                    {item.unreadCount > 0 && (
                       <div className="w-6 h-6 bg-primary-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
-                        {conv.unreadCount}
+                        {item.unreadCount}
                       </div>
                     )}
                   </div>
@@ -441,7 +501,7 @@ const Messages = () => {
             <div className="text-center">
               <MessageCircle className="mx-auto text-gray-400 mb-4" size={64} />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Select a conversation</h3>
-              <p className="text-gray-600">Choose a conversation from the list to start messaging</p>
+              <p className="text-gray-600">Choose a connection from the list to start messaging</p>
             </div>
           </div>
         )}

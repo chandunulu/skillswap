@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import {
   MapPin, Mail, Award, Target, Star, MessageCircle,
-  UserPlus, UserCheck, ChevronLeft, ThumbsUp, Calendar
+  UserPlus, UserCheck, ChevronLeft, ThumbsUp, Calendar, UserMinus
 } from 'lucide-react';
 
 const UserProfile = () => {
@@ -24,11 +24,16 @@ const UserProfile = () => {
       const response = await api.get(`/users/${id}`);
       setUser(response.data);
 
-      // Check connection status
-      if (currentUser.connections?.includes(id)) {
+      // Check connection status - fetch the actual connections list
+      const connectionsRes = await api.get('/connections/list');
+      const isConnected = connectionsRes.data.some(conn => conn._id === id);
+
+      if (isConnected) {
         setConnectionStatus('connected');
       } else if (currentUser.sentRequests?.some(req => req.to === id)) {
         setConnectionStatus('pending');
+      } else {
+        setConnectionStatus('none');
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -43,6 +48,21 @@ const UserProfile = () => {
       setConnectionStatus('pending');
     } catch (error) {
       console.error('Error sending connection request:', error);
+    }
+  };
+
+  const handleRemoveConnection = async () => {
+    if (!window.confirm(`Are you sure you want to remove ${user.name} from your connections?`)) {
+      return;
+    }
+
+    try {
+      await api.delete(`/connections/remove/${id}`);
+      setConnectionStatus('none');
+      alert('Connection removed successfully');
+    } catch (error) {
+      console.error('Error removing connection:', error);
+      alert(error.response?.data?.message || 'Failed to remove connection');
     }
   };
 
@@ -124,11 +144,25 @@ const UserProfile = () => {
                     </button>
                     <Link
                       to="/messages"
+                      state={{ 
+                        selectedUser: {
+                          _id: user._id,
+                          name: user.name,
+                          email: user.email
+                        }
+                      }}
                       className="btn-primary flex items-center justify-center space-x-2"
                     >
                       <MessageCircle size={20} />
                       <span>Message</span>
                     </Link>
+                    <button
+                      onClick={handleRemoveConnection}
+                      className="flex items-center justify-center space-x-2 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                    >
+                      <UserMinus size={20} />
+                      <span>Remove Connection</span>
+                    </button>
                   </>
                 ) : connectionStatus === 'pending' ? (
                   <button

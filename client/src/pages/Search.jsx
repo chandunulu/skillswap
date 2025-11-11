@@ -1,21 +1,32 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
-import { Search as SearchIcon, MapPin, Award, Star, Filter, UserPlus, Users, Sparkles } from 'lucide-react';
+import { Search as SearchIcon, MapPin, Award, Star, Filter, UserPlus, Users, Sparkles, UserMinus } from 'lucide-react';
 
 const Search = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [skillFilter, setSkillFilter] = useState('');
   const [users, setUsers] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('all'); // 'all' or 'recommended'
+  const [activeTab, setActiveTab] = useState('all');
 
   useEffect(() => {
+    fetchConnections();
     fetchRecommendations();
     searchUsers();
-  }, []); // Fixed: Added empty dependency array to run only once on mount
+  }, []);
+
+  const fetchConnections = async () => {
+    try {
+      const response = await api.get('/connections/list');
+      console.log('Fetched connections:', response.data);
+      setConnections(response.data);
+    } catch (error) {
+      console.error('Error fetching connections:', error);
+    }
+  };
 
   const fetchRecommendations = async () => {
     try {
@@ -47,6 +58,16 @@ const Search = () => {
     searchUsers();
   };
 
+  // Check if user is already a connection - FIXED
+  const isConnection = (userId) => {
+    const isConnected = connections.some(conn => {
+      const connId = conn._id || conn.id;
+      return connId === userId;
+    });
+    console.log(`Checking if ${userId} is connection:`, isConnected);
+    return isConnected;
+  };
+
   const sendConnectionRequest = async (userId) => {
     try {
       await api.post(`/connections/request/${userId}`);
@@ -54,143 +75,173 @@ const Search = () => {
       setUsers(users.map(user => 
         user._id === userId ? { ...user, requestSent: true } : user
       ));
-      // Also update recommendations if the user is there
       setRecommendations(recommendations.map(user => 
         user._id === userId ? { ...user, requestSent: true } : user
       ));
+      alert('Connection request sent successfully!');
     } catch (error) {
       console.error('Error sending connection request:', error);
+      alert(error.response?.data?.message || 'Failed to send connection request');
     }
   };
 
-  const UserCard = ({ user, showMatchScore = false }) => (
-    <div className="card hover:shadow-lg transition-all duration-200">
-      <div className="flex items-start space-x-4">
-        {/* Profile Picture */}
-        <div className="w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-full flex items-center justify-center flex-shrink-0">
-          <span className="text-white text-xl font-semibold">
-            {user.name.charAt(0).toUpperCase()}
-          </span>
-        </div>
+  const removeConnection = async (userId) => {
+    if (!window.confirm('Are you sure you want to remove this connection?')) {
+      return;
+    }
 
-        {/* User Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between mb-2">
-            <div>
-              <Link 
-                to={`/user/${user._id}`}
-                className="text-lg font-bold text-gray-900 hover:text-primary-600"
-              >
-                {user.name}
-              </Link>
-              {user.location && (
-                <div className="flex items-center space-x-1 text-sm text-gray-600 mt-1">
-                  <MapPin size={14} />
-                  <span>{user.location}</span>
+    try {
+      await api.delete(`/connections/remove/${userId}`);
+      // Refresh connections list
+      await fetchConnections();
+      alert('Connection removed successfully');
+    } catch (error) {
+      console.error('Error removing connection:', error);
+      alert(error.response?.data?.message || 'Failed to remove connection');
+    }
+  };
+
+  const UserCard = ({ user, showMatchScore = false }) => {
+    const isConnected = isConnection(user._id);
+
+    return (
+      <div className="card hover:shadow-lg transition-all duration-200">
+        <div className="flex items-start space-x-4">
+          {/* Profile Picture */}
+          <div className="w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-full flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-xl font-semibold">
+              {user.name.charAt(0).toUpperCase()}
+            </span>
+          </div>
+
+          {/* User Info */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <Link 
+                  to={`/user/${user._id}`}
+                  className="text-lg font-bold text-gray-900 hover:text-primary-600"
+                >
+                  {user.name}
+                </Link>
+                {user.location && (
+                  <div className="flex items-center space-x-1 text-sm text-gray-600 mt-1">
+                    <MapPin size={14} />
+                    <span>{user.location}</span>
+                  </div>
+                )}
+              </div>
+              
+              {showMatchScore && user.matchScore && (
+                <div className="text-right">
+                  <div className="text-lg font-bold text-primary-600">{user.matchScore}%</div>
+                  <div className="text-xs text-gray-600">Match</div>
                 </div>
               )}
             </div>
-            
-            {showMatchScore && user.matchScore && (
-              <div className="text-right">
-                <div className="text-lg font-bold text-primary-600">{user.matchScore}%</div>
-                <div className="text-xs text-gray-600">Match</div>
+
+            {/* Skills to Teach */}
+            {user.skillsToTeach && user.skillsToTeach.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Award size={14} className="text-green-600" />
+                  <span className="text-xs font-medium text-gray-700">Can Teach</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {user.skillsToTeach.slice(0, 4).map((skill, idx) => (
+                    <span
+                      key={idx}
+                      className="px-3 py-1 bg-green-50 text-green-700 text-xs rounded-full border border-green-200"
+                    >
+                      {skill.name}
+                    </span>
+                  ))}
+                  {user.skillsToTeach.length > 4 && (
+                    <span className="px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                      +{user.skillsToTeach.length - 4}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
-          </div>
 
-          {/* Skills to Teach */}
-          {user.skillsToTeach && user.skillsToTeach.length > 0 && (
-            <div className="mb-3">
-              <div className="flex items-center space-x-2 mb-2">
-                <Award size={14} className="text-green-600" />
-                <span className="text-xs font-medium text-gray-700">Can Teach</span>
+            {/* Skills to Learn */}
+            {user.skillsToLearn && user.skillsToLearn.length > 0 && (
+              <div className="mb-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Star size={14} className="text-blue-600" />
+                  <span className="text-xs font-medium text-gray-700">Wants to Learn</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {user.skillsToLearn.slice(0, 4).map((skill, idx) => (
+                    <span
+                      key={idx}
+                      className="px-3 py-1 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200"
+                    >
+                      {skill.name}
+                    </span>
+                  ))}
+                  {user.skillsToLearn.length > 4 && (
+                    <span className="px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                      +{user.skillsToLearn.length - 4}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {user.skillsToTeach.slice(0, 4).map((skill, idx) => (
-                  <span
-                    key={idx}
-                    className="px-3 py-1 bg-green-50 text-green-700 text-xs rounded-full border border-green-200"
-                  >
-                    {skill.name}
-                  </span>
-                ))}
-                {user.skillsToTeach.length > 4 && (
-                  <span className="px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                    +{user.skillsToTeach.length - 4}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Skills to Learn */}
-          {user.skillsToLearn && user.skillsToLearn.length > 0 && (
-            <div className="mb-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <Star size={14} className="text-blue-600" />
-                <span className="text-xs font-medium text-gray-700">Wants to Learn</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {user.skillsToLearn.slice(0, 4).map((skill, idx) => (
-                  <span
-                    key={idx}
-                    className="px-3 py-1 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200"
-                  >
-                    {skill.name}
-                  </span>
-                ))}
-                {user.skillsToLearn.length > 4 && (
-                  <span className="px-3 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                    +{user.skillsToLearn.length - 4}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Rating */}
-          {user.ratings && user.ratings.average > 0 && (
-            <div className="flex items-center space-x-1 mb-4">
-              <Star className="text-yellow-400 fill-yellow-400" size={16} />
-              <span className="text-sm font-semibold text-gray-900">
-                {user.ratings.average.toFixed(1)}
-              </span>
-              <span className="text-sm text-gray-600">
-                ({user.ratings.count} reviews)
-              </span>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center space-x-3">
-            <Link
-              to={`/user/${user._id}`}
-              className="btn-secondary text-sm"
-            >
-              View Profile
-            </Link>
-            {!user.requestSent ? (
-              <button
-                onClick={() => sendConnectionRequest(user._id)}
-                className="btn-primary text-sm flex items-center space-x-2"
-              >
-                <UserPlus size={16} />
-                <span>Connect</span>
-              </button>
-            ) : (
-              <button
-                disabled
-                className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm cursor-not-allowed"
-              >
-                Request Sent
-              </button>
             )}
+
+            {/* Rating */}
+            {user.ratings && user.ratings.average > 0 && (
+              <div className="flex items-center space-x-1 mb-4">
+                <Star className="text-yellow-400 fill-yellow-400" size={16} />
+                <span className="text-sm font-semibold text-gray-900">
+                  {user.ratings.average.toFixed(1)}
+                </span>
+                <span className="text-sm text-gray-600">
+                  ({user.ratings.count} reviews)
+                </span>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center space-x-3">
+              <Link
+                to={`/user/${user._id}`}
+                className="btn-secondary text-sm"
+              >
+                View Profile
+              </Link>
+              
+              {isConnected ? (
+                <button
+                  onClick={() => removeConnection(user._id)}
+                  className="px-4 py-2 bg-red-100 text-red-600 hover:bg-red-200 rounded-lg text-sm flex items-center space-x-2 transition-colors"
+                >
+                  <UserMinus size={16} />
+                  <span>Remove</span>
+                </button>
+              ) : user.requestSent ? (
+                <button
+                  disabled
+                  className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm cursor-not-allowed"
+                >
+                  Request Sent
+                </button>
+              ) : (
+                <button
+                  onClick={() => sendConnectionRequest(user._id)}
+                  className="btn-primary text-sm flex items-center space-x-2"
+                >
+                  <UserPlus size={16} />
+                  <span>Connect</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

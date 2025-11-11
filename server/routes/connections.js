@@ -12,6 +12,23 @@ router.post('/request/:userId', auth, async (req, res) => {
       return res.status(400).json({ message: 'Cannot send request to yourself' });
     }
 
+    // Check if already connected
+    const currentUser = await User.findById(req.userId);
+    const isAlreadyConnected = currentUser.connections.includes(targetUserId);
+    
+    if (isAlreadyConnected) {
+      return res.status(400).json({ message: 'Already connected with this user' });
+    }
+
+    // Check if request already sent
+    const requestAlreadySent = currentUser.sentRequests.some(
+      req => req.to.toString() === targetUserId
+    );
+    
+    if (requestAlreadySent) {
+      return res.status(400).json({ message: 'Request already sent' });
+    }
+
     // Add to target user's pending requests
     await User.findByIdAndUpdate(targetUserId, {
       $addToSet: {
@@ -72,6 +89,45 @@ router.post('/reject/:userId', auth, async (req, res) => {
     res.json({ message: 'Connection request rejected' });
   } catch (error) {
     console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Remove/Unfollow connection - NEW ROUTE
+router.delete('/remove/:userId', auth, async (req, res) => {
+  try {
+    const targetUserId = req.params.userId;
+
+    // Prevent removing yourself
+    if (req.userId === targetUserId) {
+      return res.status(400).json({ message: 'Cannot remove yourself' });
+    }
+
+    // Check if connection exists
+    const currentUser = await User.findById(req.userId);
+    const isConnected = currentUser.connections.some(
+      conn => conn.toString() === targetUserId
+    );
+
+    if (!isConnected) {
+      return res.status(404).json({ message: 'Connection not found' });
+    }
+
+    // Remove from both users' connections arrays
+    await User.findByIdAndUpdate(req.userId, {
+      $pull: { connections: targetUserId }
+    });
+
+    await User.findByIdAndUpdate(targetUserId, {
+      $pull: { connections: req.userId }
+    });
+
+    res.json({ 
+      message: 'Connection removed successfully',
+      removedUserId: targetUserId 
+    });
+  } catch (error) {
+    console.error('Error removing connection:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

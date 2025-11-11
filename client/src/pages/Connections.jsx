@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { Users, UserCheck, UserPlus, X, Check, MessageCircle, Award } from 'lucide-react';
+import { Users, UserCheck, UserPlus, X, Check, MessageCircle, Award, UserMinus } from 'lucide-react';
 
 const Connections = () => {
   const navigate = useNavigate();
   const [connections, setConnections] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('connections'); // 'connections' or 'requests'
+  const [activeTab, setActiveTab] = useState('connections');
 
   useEffect(() => {
     fetchData();
@@ -36,6 +36,7 @@ const Connections = () => {
       fetchData();
     } catch (error) {
       console.error('Error accepting request:', error);
+      alert('Failed to accept request');
     }
   };
 
@@ -45,11 +46,26 @@ const Connections = () => {
       fetchData();
     } catch (error) {
       console.error('Error rejecting request:', error);
+      alert('Failed to reject request');
+    }
+  };
+
+  const handleRemoveConnection = async (userId, userName) => {
+    if (!window.confirm(`Are you sure you want to remove ${userName} from your connections?`)) {
+      return;
+    }
+
+    try {
+      await api.delete(`/connections/remove/${userId}`);
+      fetchData(); // Refresh the list
+      alert('Connection removed successfully');
+    } catch (error) {
+      console.error('Error removing connection:', error);
+      alert(error.response?.data?.message || 'Failed to remove connection');
     }
   };
 
   const handleMessageClick = (connection) => {
-    // Navigate to messages page with the selected user's data
     navigate('/messages', { 
       state: { 
         selectedUser: {
@@ -170,19 +186,30 @@ const Connections = () => {
                   )}
 
                   {/* Actions */}
-                  <div className="flex space-x-2">
-                    <Link
-                      to={`/user/${connection._id}`}
-                      className="flex-1 btn-secondary text-sm"
-                    >
-                      View Profile
-                    </Link>
+                  <div className="space-y-2">
+                    <div className="flex space-x-2">
+                      <Link
+                        to={`/user/${connection._id}`}
+                        className="flex-1 btn-secondary text-sm"
+                      >
+                        View Profile
+                      </Link>
+                      <button
+                        onClick={() => handleMessageClick(connection)}
+                        className="flex-1 btn-primary text-sm flex items-center justify-center space-x-1"
+                      >
+                        <MessageCircle size={14} />
+                        <span>Message</span>
+                      </button>
+                    </div>
+                    
+                    {/* Remove Connection Button */}
                     <button
-                      onClick={() => handleMessageClick(connection)}
-                      className="flex-1 btn-primary text-sm flex items-center justify-center space-x-1"
+                      onClick={() => handleRemoveConnection(connection._id, connection.name)}
+                      className="w-full px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm flex items-center justify-center space-x-1 transition-colors"
                     >
-                      <MessageCircle size={14} />
-                      <span>Message</span>
+                      <UserMinus size={14} />
+                      <span>Remove Connection</span>
                     </button>
                   </div>
                 </div>
