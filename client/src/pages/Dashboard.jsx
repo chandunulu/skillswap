@@ -84,7 +84,7 @@ const Dashboard = () => {
       {/* Welcome Section */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Welcome back, {user?.name}! 👋
+          Welcome back, {user?.name}! 
         </h1>
         <p className="text-gray-600">Here's what's happening in your learning journey</p>
       </div>

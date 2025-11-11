@@ -59,7 +59,7 @@ const Register = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-primary-600 to-primary-700 rounded-2xl mb-4">
             <span className="text-white font-bold text-2xl">SS</span>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Join SkillSwap</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Join SkillShift</h1>
           <p className="text-gray-600">Start learning and sharing skills today</p>
         </div>
 

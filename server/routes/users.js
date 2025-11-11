@@ -22,7 +22,7 @@ router.get('/search', auth, async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .select('name email profilePicture location skillsToTeach skillsToLearn ratings')
+      .select('name email profileImage location skillsToTeach skillsToLearn ratings')
       .limit(50);
 
     res.json(users);
@@ -37,8 +37,8 @@ router.get('/:id', auth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select('-password')
-      .populate('connections', 'name email profilePicture')
-      .populate('endorsements.endorsedBy', 'name profilePicture');
+      .populate('connections', 'name email profileImage')
+      .populate('endorsements.endorsedBy', 'name profileImage');
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -51,28 +51,64 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// Update profile
+// Update profile - SIMPLE VERSION (no file upload yet)
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { name, bio, location, skillsToTeach, skillsToLearn, isPublic } = req.body;
+    console.log('Profile update request received:', req.body);
+    
+    let { name, bio, location, skillsToTeach, skillsToLearn, isPublic } = req.body;
+
+    // Parse JSON strings if they come as strings (from FormData)
+    if (typeof skillsToTeach === 'string') {
+      try {
+        skillsToTeach = JSON.parse(skillsToTeach);
+      } catch (e) {
+        console.error('Error parsing skillsToTeach:', e);
+        skillsToTeach = [];
+      }
+    }
+
+    if (typeof skillsToLearn === 'string') {
+      try {
+        skillsToLearn = JSON.parse(skillsToLearn);
+      } catch (e) {
+        console.error('Error parsing skillsToLearn:', e);
+        skillsToLearn = [];
+      }
+    }
+
+    // Handle isPublic conversion
+    if (typeof isPublic === 'string') {
+      isPublic = isPublic === 'true';
+    }
+
+    // Prepare update object
+    const updateData = {
+      name,
+      bio,
+      location,
+      skillsToTeach: skillsToTeach || [],
+      skillsToLearn: skillsToLearn || [],
+      isPublic: isPublic !== undefined ? isPublic : true
+    };
+
+    console.log('Updating user with data:', updateData);
 
     const user = await User.findByIdAndUpdate(
       req.userId,
-      {
-        name,
-        bio,
-        location,
-        skillsToTeach,
-        skillsToLearn,
-        isPublic
-      },
+      updateData,
       { new: true, runValidators: true }
     ).select('-password');
 
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    console.log('User updated successfully:', user._id);
     res.json(user);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Profile update error:', error);
+    res.status(500).json({ message: error.message || 'Server error' });
   }
 });
 
@@ -80,17 +116,26 @@ router.put('/profile', auth, async (req, res) => {
 router.get('/recommendations/matches', auth, async (req, res) => {
   try {
     const currentUser = await User.findById(req.userId);
-    const skillsToLearn = currentUser.skillsToLearn.map(s => s.name.toLowerCase());
+    
+    if (!currentUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const skillsToLearn = currentUser.skillsToLearn?.map(s => s.name.toLowerCase()) || [];
+
+    if (skillsToLearn.length === 0) {
+      return res.json([]);
+    }
 
     // Find users who teach what current user wants to learn
     const matches = await User.find({
-      _id: { $ne: req.userId, $nin: currentUser.connections },
+      _id: { $ne: req.userId, $nin: currentUser.connections || [] },
       isPublic: true,
       'skillsToTeach.name': {
         $in: skillsToLearn.map(s => new RegExp(s, 'i'))
       }
     })
-    .select('name email profilePicture location skillsToTeach skillsToLearn ratings')
+    .select('name email profileImage location skillsToTeach skillsToLearn ratings')
     .limit(10);
 
     // Calculate match score
@@ -108,15 +153,15 @@ router.get('/recommendations/matches', auth, async (req, res) => {
       });
 
       // Mutual learning opportunity
-      const matchSkillsToLearn = match.skillsToLearn.map(s => s.name.toLowerCase());
-      currentUser.skillsToTeach.forEach(skill => {
+      const matchSkillsToLearn = match.skillsToLearn?.map(s => s.name.toLowerCase()) || [];
+      currentUser.skillsToTeach?.forEach(skill => {
         if (matchSkillsToLearn.includes(skill.name.toLowerCase())) {
           score += 15; // Higher score for mutual benefit
         }
       });
 
       // Rating bonus
-      score += (match.ratings.average || 0) * 2;
+      score += (match.ratings?.average || 0) * 2;
 
       return {
         ...match.toObject(),
@@ -150,7 +195,7 @@ router.post('/:id/endorse', auth, async (req, res) => {
         }
       },
       { new: true }
-    ).populate('endorsements.endorsedBy', 'name profilePicture');
+    ).populate('endorsements.endorsedBy', 'name profileImage');
 
     res.json(user.endorsements);
   } catch (error) {
@@ -160,5 +205,3 @@ router.post('/:id/endorse', auth, async (req, res) => {
 });
 
 module.exports = router;
-
-
